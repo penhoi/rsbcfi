@@ -47,7 +47,7 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
     MachineInstr *preCall = NULL;
     for (auto &MI : MBB) {
       if (preCall != NULL)
-        RSBCFI_CALL_INSTR(preCall);
+        RSBCFI_CALL_INSTR(MI);
 
       if (MI.isCall())
         preCall = &MI;
@@ -55,7 +55,7 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
         preCall = NULL;
     }
     if (preCall != NULL)
-      RSBCFI_CALL_INSTR(preCall);
+      RSBCFI_CALL_INSTR(MBB.end());
 
     /* Do instrumentation before a RETURN */
     MachineInstr &MI = MBB.back();
