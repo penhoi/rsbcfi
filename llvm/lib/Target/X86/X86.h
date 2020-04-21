@@ -129,6 +129,7 @@ void initializeEvexToVexInstPassPass(PassRegistry &);
 
 FunctionPass *createX86SpeculativeLoadHardeningPass();
 
+FunctionPass *createX86RSBCFI();
 } // End llvm namespace
 
 #endif

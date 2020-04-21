@@ -50,9 +50,10 @@
 
 using namespace llvm;
 
-static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
-                               cl::desc("Enable the machine combiner pass"),
-                               cl::init(true), cl::Hidden);
+static cl::opt<bool>
+    EnableMachineCombinerPass("x86-machine-combiner",
+                              cl::desc("Enable the machine combiner pass"),
+                              cl::init(true), cl::Hidden);
 
 static cl::opt<bool> EnableSpeculativeLoadHardening(
     "x86-speculative-load-hardening",
@@ -159,8 +160,7 @@ static std::string computeDataLayout(const Triple &TT) {
   return Ret;
 }
 
-static Reloc::Model getEffectiveRelocModel(const Triple &TT,
-                                           bool JIT,
+static Reloc::Model getEffectiveRelocModel(const Triple &TT, bool JIT,
                                            Optional<Reloc::Model> RM) {
   bool is64Bit = TT.getArch() == Triple::x86_64;
   if (!RM.hasValue()) {
@@ -295,7 +295,8 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
   // Extract required-vector-width attribute.
   unsigned RequiredVectorWidth = UINT32_MAX;
   if (F.hasFnAttribute("required-vector-width")) {
-    StringRef Val = F.getFnAttribute("required-vector-width").getValueAsString();
+    StringRef Val =
+        F.getFnAttribute("required-vector-width").getValueAsString();
     unsigned Width;
     if (!Val.getAsInteger(0, Width)) {
       Key += ",required-vector-width=";
@@ -315,10 +316,9 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = llvm::make_unique<X86Subtarget>(TargetTriple, CPU, FS, *this,
-                                        Options.StackAlignmentOverride,
-                                        PreferVectorWidthOverride,
-                                        RequiredVectorWidth);
+    I = llvm::make_unique<X86Subtarget>(
+        TargetTriple, CPU, FS, *this, Options.StackAlignmentOverride,
+        PreferVectorWidthOverride, RequiredVectorWidth);
   }
   return I.get();
 }
@@ -327,9 +327,9 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
 // Command line options for x86
 //===----------------------------------------------------------------------===//
 static cl::opt<bool>
-UseVZeroUpper("x86-use-vzeroupper", cl::Hidden,
-  cl::desc("Minimize AVX to SSE transition penalty"),
-  cl::init(true));
+    UseVZeroUpper("x86-use-vzeroupper", cl::Hidden,
+                  cl::desc("Minimize AVX to SSE transition penalty"),
+                  cl::init(true));
 
 //===----------------------------------------------------------------------===//
 // X86 TTI query.
@@ -350,7 +350,7 @@ namespace {
 class X86PassConfig : public TargetPassConfig {
 public:
   X86PassConfig(X86TargetMachine &TM, PassManagerBase &PM)
-    : TargetPassConfig(TM, PM) {}
+      : TargetPassConfig(TM, PM) {}
 
   X86TargetMachine &getX86TargetMachine() const {
     return getTM<X86TargetMachine>();
@@ -392,10 +392,10 @@ char X86ExecutionDomainFix::ID;
 } // end anonymous namespace
 
 INITIALIZE_PASS_BEGIN(X86ExecutionDomainFix, "x86-execution-domain-fix",
-  "X86 Execution Domain Fix", false, false)
+                      "X86 Execution Domain Fix", false, false)
 INITIALIZE_PASS_DEPENDENCY(ReachingDefAnalysis)
 INITIALIZE_PASS_END(X86ExecutionDomainFix, "x86-execution-domain-fix",
-  "X86 Execution Domain Fix", false, false)
+                    "X86 Execution Domain Fix", false, false)
 
 TargetPassConfig *X86TargetMachine::createPassConfig(PassManagerBase &PM) {
   return new X86PassConfig(*this, PM);
@@ -518,4 +518,6 @@ void X86PassConfig::addPreEmitPass2() {
   const Triple &TT = TM->getTargetTriple();
   if (!TT.isOSDarwin() && !TT.isOSWindows())
     addPass(createCFIInstrInserter());
+
+  addPass(createX86RSBCFI());
 }
