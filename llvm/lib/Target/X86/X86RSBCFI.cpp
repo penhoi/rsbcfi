@@ -29,17 +29,45 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
 
   const X86Subtarget *STI = &MF.getSubtarget<X86Subtarget>();
   const X86InstrInfo *TII = STI->getInstrInfo();
+  const char *strInstCall = "xtest\n\t"
+                            "jz Lxend\n\t"
+                            "mov %%eax, %%ecx\n\t"
+                            "rdtsc\n\t"
+                            "sub %%ecx, %%eax\n\t"
+                            "cmp $1000, %%eax\n\t"
+                            "jl 1f\n\t"
+                            "xabort $33\n\t"
+                            "1:\n\t"
+                            "xchg %%rax, %%r11\n\t"
+                            "xend\n\t"
+                            "Lxend:\n\t";
+
+  const char *strInstRet = "xchg %%rax, %%r11\n\t"
+                           "clflush (%%rsp)\n\t"
+                           "mfence\n\t"
+                           "xbegin tsx_handler\n\t"
+                           "rdtsc\n\t";
 
 #define RSBCFI_CALL_INSTR(MI)                                                  \
   do {                                                                         \
-    BuildMI(MBB, MI, DebugLoc(), TII->get(X86::NOOP));                         \
-    BuildMI(MBB, MI, DebugLoc(), TII->get(X86::XTEST));                        \
+    MachineInstrBuilder MIB =                                                  \
+        BuildMI(MBB, MI, DebugLoc(), TII->get(X86::INLINEASM));                \
+    MIB.addExternalSymbol(strInstCall);                                        \
+    MIB.addImm(ISD::EntryToken);                                               \
+    MIB.addImm(ISD::Register | InlineAsm::Kind_Clobber);                       \
+    MIB.addReg(X86::EFLAGS, RegState::Define | RegState::EarlyClobber |        \
+                                RegState::Implicit);                           \
   } while (0);
 
-#define RSBCFI_RETL_INSTR(MI)                                                  \
+#define RSBCFI_RET_INSTR(MI)                                                   \
   do {                                                                         \
-    BuildMI(MBB, MI, DebugLoc(), TII->get(X86::NOOP));                         \
-    BuildMI(MBB, MI, DebugLoc(), TII->get(X86::NOOP));                         \
+    MachineInstrBuilder MIB =                                                  \
+        BuildMI(MBB, MI, DebugLoc(), TII->get(X86::INLINEASM));                \
+    MIB.addExternalSymbol(strInstRet);                                         \
+    MIB.addImm(ISD::EntryToken);                                               \
+    MIB.addImm(ISD::Register | InlineAsm::Kind_Clobber);                       \
+    MIB.addReg(X86::EFLAGS, RegState::Define | RegState::EarlyClobber |        \
+                                RegState::Implicit);                           \
   } while (0);
 
   for (auto &MBB : MF) {
@@ -60,7 +88,7 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
     /* Do instrumentation before a RETURN */
     MachineInstr &MI = MBB.back();
     if (MI.isReturn())
-      RSBCFI_RETL_INSTR(MI);
+      RSBCFI_RET_INSTR(MI);
   }
 
   return false;
