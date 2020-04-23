@@ -12,17 +12,25 @@ namespace {
 class X86RSBCFI : public MachineFunctionPass {
 public:
   static char ID;
+  static bool bCFI;
 
   X86RSBCFI() : MachineFunctionPass(ID) {
     // initializeX86RSBCFIPass(*PassRegistry::getPassRegistry());
+    const char *szCFI = getenv("RSBCFI");
+    if (szCFI != NULL)
+      bCFI = true;
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 };
 
 char X86RSBCFI::ID = 0;
+bool X86RSBCFI::bCFI = false;
 
 bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
+  if (!bCFI)
+    return false;
+
   const TargetMachine *TM = &MF.getTarget();
   if (TM->getTargetTriple().getArch() != Triple::x86_64)
     return false;
@@ -30,20 +38,20 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
   const X86Subtarget *STI = &MF.getSubtarget<X86Subtarget>();
   const X86InstrInfo *TII = STI->getInstrInfo();
   const char *strInstCall = "xtest\n\t"
-                            "jz Lxend\n\t"
-                            "mov %%eax, %%ecx\n\t"
+                            "jz 2f\n\t"
+                            "mov %eax, %ecx\n\t"
                             "rdtsc\n\t"
-                            "sub %%ecx, %%eax\n\t"
-                            "cmp $1000, %%eax\n\t"
+                            "sub %ecx, %eax\n\t"
+                            "cmp $$1000, %eax\n\t"
                             "jl 1f\n\t"
-                            "xabort $33\n\t"
+                            "xabort $$33\n\t"
                             "1:\n\t"
-                            "xchg %%rax, %%r11\n\t"
+                            "xchg %rax, %r11\n\t"
                             "xend\n\t"
-                            "Lxend:\n\t";
+                            "2:\n\t";
 
-  const char *strInstRet = "xchg %%rax, %%r11\n\t"
-                           "clflush (%%rsp)\n\t"
+  const char *strInstRet = "xchg %rax, %r11\n\t"
+                           "clflush (%rsp)\n\t"
                            "mfence\n\t"
                            "xbegin tsx_handler\n\t"
                            "rdtsc\n\t";
@@ -70,8 +78,8 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
                                 RegState::Implicit);                           \
   } while (0);
 
+  /* Do instrumentation after a CALL */
   for (auto &MBB : MF) {
-    /* Do instrumentation after a CALL */
     MachineInstr *preCall = NULL;
     for (auto &MI : MBB) {
       if (preCall != NULL)
@@ -84,11 +92,15 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
     }
     if (preCall != NULL)
       RSBCFI_CALL_INSTR(MBB.end());
+  }
 
-    /* Do instrumentation before a RETURN */
-    MachineInstr &MI = MBB.back();
-    if (MI.isReturn())
-      RSBCFI_RET_INSTR(MI);
+  /* Do instrumentation before a RETURN */
+  if (!MF.getFunction().hasExternalLinkage()) {
+    for (auto &MBB : MF) {
+      MachineInstr &MI = MBB.back();
+      if (MI.isReturn())
+        RSBCFI_RET_INSTR(MI);
+    }
   }
 
   return false;
