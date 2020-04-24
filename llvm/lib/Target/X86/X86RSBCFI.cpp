@@ -6,6 +6,7 @@
 #include "llvm/Target/TargetMachine.h"
 #include <algorithm>
 #include <string>
+#include <vector>
 
 using namespace llvm;
 using namespace std;
@@ -15,9 +16,11 @@ namespace {
 class X86RSBCFI : public MachineFunctionPass {
 public:
   static char ID;
-  static bool bCFI;
+  static bool bCFI; // Enforce RSBCFI or not
   static string tmpInstCall;
   static string tmpInstRet;
+  /* a whitelist of functions whose RET shouldn't be instrumented */
+  vector<string> WL;
 
   X86RSBCFI() : MachineFunctionPass(ID) {
     // initializeX86RSBCFIPass(*PassRegistry::getPassRegistry());
@@ -34,6 +37,10 @@ public:
     strEnv = getenv("RSBCFI_THRESVAL2");
     if (strEnv != NULL)
       replace_substr(tmpInstCall, "800", strEnv);
+
+    strEnv = getenv("RSBCFI_WHITELIST");
+    if (strEnv != NULL)
+      read_WL(strEnv);
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
@@ -44,6 +51,63 @@ private:
     if (start_pos == string::npos)
       return false;
     str.replace(start_pos, from.length(), to);
+    return true;
+  }
+
+  char *trimwhitespace(char *str) {
+    // assert(str != NULL);
+    // Trim leading space
+    while (isspace((unsigned char)*str))
+      str++;
+
+    if (*str == 0) // All spaces?
+      return str;
+
+    // Trim trailing space
+    char *end = str + strlen(str) - 1;
+    while (end > str && isspace((unsigned char)*end))
+      end--;
+
+    // Write new null terminator character
+    end[1] = '\0';
+
+    return str;
+  }
+
+  char *trimcomment(char *szLine) {
+    /* append with comment ? */
+    char *shap = strchr(szLine, '#');
+    if (shap != NULL)
+      *shap = 0;
+
+    return szLine;
+  }
+
+  bool read_WL(const char *szFName) {
+    /* always white-list function MAIN */
+    WL.push_back("main");
+
+    char szLine[1024];
+    FILE *f;
+
+    f = fopen(szFName, "r");
+    if (f == NULL)
+      return false;
+
+    while (fgets(szLine, 1024, f) != NULL) {
+      /* With comment ? */
+      char *str = trimcomment(szLine);
+      str = trimwhitespace(str);
+
+      if (strlen(str) < 2)
+        continue;
+
+      /* add only when not exist */
+      if (find(WL.begin(), WL.end(), str) == WL.end())
+        WL.push_back(str);
+    }
+
+    fclose(f);
     return true;
   }
 };
@@ -113,8 +177,9 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
       RSBCFI_INSTRUMENT(MBB.end(), tmpInstCall);
   }
 
-  /* Do instrumentation before a RETURN */
-  if (!MF.getFunction().hasExternalLinkage()) {
+  // if (!MF.getFunction().hasExternalLinkage()) {
+  if (find(WL.begin(), WL.end(), MF.getName()) == WL.end()) {
+    /* Do instrumentation before a RETURN */
     for (auto &MBB : MF) {
       MachineInstr &MI = MBB.back();
       if (MI.isReturn())
