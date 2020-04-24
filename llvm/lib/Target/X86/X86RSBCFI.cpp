@@ -36,7 +36,7 @@ public:
 
     strEnv = getenv("RSBCFI_THRESVAL2");
     if (strEnv != NULL)
-      replace_substr(tmpInstCall, "800", strEnv);
+      replace_substr(tmpInstCall, "1000", strEnv);
 
     /* always white-list function MAIN */
     WL.push_back("main");
@@ -122,7 +122,7 @@ std::string X86RSBCFI::tmpInstCall = "xtest\n\t"
                                      "sub %ecx, %eax\n\t"
                                      "cmp $$200, %eax\n\t"
                                      "jl 2f\n\t"
-                                     "cmp $$800, %eax\n\t"
+                                     "cmp $$1000, %eax\n\t"
                                      "ja 3f\n\t"
                                      "xabort $$0x33\n\t"
                                      "3:\n\t"
