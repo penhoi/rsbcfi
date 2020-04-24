@@ -4,8 +4,11 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Target/TargetMachine.h"
+#include <algorithm>
+#include <string>
 
 using namespace llvm;
+using namespace std;
 
 namespace {
 
@@ -13,19 +16,64 @@ class X86RSBCFI : public MachineFunctionPass {
 public:
   static char ID;
   static bool bCFI;
+  static string tmpInstCall;
+  static string tmpInstRet;
 
   X86RSBCFI() : MachineFunctionPass(ID) {
     // initializeX86RSBCFIPass(*PassRegistry::getPassRegistry());
-    const char *szCFI = getenv("RSBCFI");
-    if (szCFI != NULL)
+    const char *strEnv;
+
+    strEnv = getenv("RSBCFI_ENFORCE");
+    if (strEnv != NULL)
       bCFI = true;
+
+    strEnv = getenv("RSBCFI_THRESVAL1");
+    if (strEnv != NULL)
+      replace_substr(tmpInstCall, "200", strEnv);
+
+    strEnv = getenv("RSBCFI_THRESVAL2");
+    if (strEnv != NULL)
+      replace_substr(tmpInstCall, "800", strEnv);
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+private:
+  bool replace_substr(string &str, const string &from, const string &to) {
+    size_t start_pos = str.find(from);
+    if (start_pos == string::npos)
+      return false;
+    str.replace(start_pos, from.length(), to);
+    return true;
+  }
 };
 
 char X86RSBCFI::ID = 0;
 bool X86RSBCFI::bCFI = false;
+
+/* ----benign----200----unknow----800----attack---- */
+std::string X86RSBCFI::tmpInstCall = "xtest\n\t"
+                                     "jz 1f\n\t"
+                                     "mov %eax, %ecx\n\t"
+                                     "rdtsc\n\t"
+                                     "sub %ecx, %eax\n\t"
+                                     "cmp $$200, %eax\n\t"
+                                     "jl 2f\n\t"
+                                     "cmp $$800, %eax\n\t"
+                                     "ja 3f\n\t"
+                                     "xabort $$0x33\n\t"
+                                     "3:\n\t"
+                                     "xabort $$0x44\n\t"
+                                     "2:\n\t"
+                                     "xend\n\t"
+                                     "xchg %rax, %r11\n\t"
+                                     "1:\n\t";
+
+std::string X86RSBCFI::tmpInstRet = "xchg %rax, %r11\n\t"
+                                    "clflush (%rsp)\n\t"
+                                    "mfence\n\t"
+                                    "xbegin tsx_handler\n\t"
+                                    "rdtsc\n\t";
 
 bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
   if (!bCFI)
@@ -37,41 +85,12 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
 
   const X86Subtarget *STI = &MF.getSubtarget<X86Subtarget>();
   const X86InstrInfo *TII = STI->getInstrInfo();
-  const char *strInstCall = "xtest\n\t"
-                            "jz 2f\n\t"
-                            "mov %eax, %ecx\n\t"
-                            "rdtsc\n\t"
-                            "sub %ecx, %eax\n\t"
-                            "cmp $$1000, %eax\n\t"
-                            "jl 1f\n\t"
-                            "xabort $$33\n\t"
-                            "1:\n\t"
-                            "xchg %rax, %r11\n\t"
-                            "xend\n\t"
-                            "2:\n\t";
 
-  const char *strInstRet = "xchg %rax, %r11\n\t"
-                           "clflush (%rsp)\n\t"
-                           "mfence\n\t"
-                           "xbegin tsx_handler\n\t"
-                           "rdtsc\n\t";
-
-#define RSBCFI_CALL_INSTR(MI)                                                  \
+#define RSBCFI_INSTRUMENT(MI, strAsm)                                          \
   do {                                                                         \
     MachineInstrBuilder MIB =                                                  \
         BuildMI(MBB, MI, DebugLoc(), TII->get(X86::INLINEASM));                \
-    MIB.addExternalSymbol(strInstCall);                                        \
-    MIB.addImm(ISD::EntryToken);                                               \
-    MIB.addImm(ISD::Register | InlineAsm::Kind_Clobber);                       \
-    MIB.addReg(X86::EFLAGS, RegState::Define | RegState::EarlyClobber |        \
-                                RegState::Implicit);                           \
-  } while (0);
-
-#define RSBCFI_RET_INSTR(MI)                                                   \
-  do {                                                                         \
-    MachineInstrBuilder MIB =                                                  \
-        BuildMI(MBB, MI, DebugLoc(), TII->get(X86::INLINEASM));                \
-    MIB.addExternalSymbol(strInstRet);                                         \
+    MIB.addExternalSymbol(strAsm.c_str());                                     \
     MIB.addImm(ISD::EntryToken);                                               \
     MIB.addImm(ISD::Register | InlineAsm::Kind_Clobber);                       \
     MIB.addReg(X86::EFLAGS, RegState::Define | RegState::EarlyClobber |        \
@@ -83,7 +102,7 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
     MachineInstr *preCall = NULL;
     for (auto &MI : MBB) {
       if (preCall != NULL)
-        RSBCFI_CALL_INSTR(MI);
+        RSBCFI_INSTRUMENT(MI, tmpInstCall);
 
       if (MI.isCall())
         preCall = &MI;
@@ -91,7 +110,7 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
         preCall = NULL;
     }
     if (preCall != NULL)
-      RSBCFI_CALL_INSTR(MBB.end());
+      RSBCFI_INSTRUMENT(MBB.end(), tmpInstCall);
   }
 
   /* Do instrumentation before a RETURN */
@@ -99,7 +118,7 @@ bool X86RSBCFI::runOnMachineFunction(MachineFunction &MF) {
     for (auto &MBB : MF) {
       MachineInstr &MI = MBB.back();
       if (MI.isReturn())
-        RSBCFI_RET_INSTR(MI);
+        RSBCFI_INSTRUMENT(MI, tmpInstRet);
     }
   }
 
