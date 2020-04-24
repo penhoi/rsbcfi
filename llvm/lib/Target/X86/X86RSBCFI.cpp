@@ -38,6 +38,8 @@ public:
     if (strEnv != NULL)
       replace_substr(tmpInstCall, "800", strEnv);
 
+    /* always white-list function MAIN */
+    WL.push_back("main");
     strEnv = getenv("RSBCFI_WHITELIST");
     if (strEnv != NULL)
       read_WL(strEnv);
@@ -84,9 +86,6 @@ private:
   }
 
   bool read_WL(const char *szFName) {
-    /* always white-list function MAIN */
-    WL.push_back("main");
-
     char szLine[1024];
     FILE *f;
 
